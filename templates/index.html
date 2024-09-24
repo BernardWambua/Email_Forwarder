@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Forwarder</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.3/css/bulma.min.css">
+</head>
+<body>
+    <section class="section">
+        <div class="container">
+            <h1 class="title">Email Forwarder</h1>
+            <form method="POST" enctype="multipart/form-data">
+                <div class="field">
+                    <label class="label">IMAP Server</label>
+                    <div class="control">
+                        <input class="input" type="text" name="imap_server" placeholder="IMAP Server" required>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">SMTP Server</label>
+                    <div class="control">
+                        <input class="input" type="text" name="smtp_server" placeholder="SMTP Server" required>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Mail Date</label>
+                    <div class="control">
+                        <input class="input" type="text" name="mail_date" placeholder="dd/mm/yyyy" required>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Staff Number</label>
+                    <div class="control">
+                        <input class="input" type="text" name="staff_number" placeholder="Staff Number" required>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Sender Email</label>
+                    <div class="control">
+                        <input class="input" type="email" name="sender_email" placeholder="Sender Email" required>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Password</label>
+                    <div class="control">
+                        <input class="input" type="password" name="password" placeholder="Password" required>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Sender Filter</label>
+                    <div class="control">
+                        <input class="input" type="text" name="sender_filter" placeholder="Sender Filter" required>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Excel File</label>
+                    <div class="control">
+                        <input class="input" type="file" name="excel_file" required>
+                    </div>
+                </div>
+                <div class="control">
+                    <button class="button is-primary" type="submit">Forward Emails</button>
+                </div>
+            </form>
+        </div>
+    </section>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="container">
+            <div class="notification is-primary">
+                {% for category, message in messages %}
+                    <p>{{ message }}</p>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+    {% endwith %}
+</body>
+</html>
