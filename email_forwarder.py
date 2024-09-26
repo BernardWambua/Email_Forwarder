@@ -7,6 +7,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+from bs4 import BeautifulSoup
+
 
 class EmailForwarder:
     def __init__(self, imap_server, smtp_server, mail_date, staff_number, sender_email, password, excel_file,
@@ -47,10 +49,39 @@ class EmailForwarder:
 
     @staticmethod
     def extract_registration_number(body):
-        match = re.search(r"Vehicle Registration # :\s*([A-Z0-9]+)", body)
+        # Parse the HTML to extract the plain text
+        soup = BeautifulSoup(body, "html.parser")
+        plain_text = soup.get_text(separator=" ")  # Extract plain text from the HTML
+
+        print(f"Extracted Plain Text: {plain_text}")  # Debugging: print the extracted plain text
+
+        # Now apply the regular expression to extract the registration number
+        match = re.search(r"Vehicle Registration\s*#\s*:\s*([A-Za-z0-9]+)", plain_text)
+
         if match:
+            print(f"Registration Number Found: {match.group(1)}")  # Debugging output
             return match.group(1)
-        return None
+        else:
+            print("No Registration Number Found")  # Debugging output
+            return None
+
+    @staticmethod
+    def extract_other_fields(body):
+        """Extract other relevant fields like certificate number, policy number."""
+        certificate_match = re.search(r"Certificate #\s*:\s*([A-Z0-9]+)", body)
+        certificate_number = certificate_match.group(1) if certificate_match else None
+
+        policy_match = re.search(r"Policy #\s*:\s*([A-Z0-9/]+)", body)
+        policy_number = policy_match.group(1) if policy_match else None
+
+        chassis_match = re.search(r"Chassis #\s*:\s*([A-Z0-9]+)", body)
+        chassis_number = chassis_match.group(1) if chassis_match else None
+
+        return {
+            "certificate_number": certificate_number,
+            "policy_number": policy_number,
+            "chassis_number": chassis_number
+        }
 
     def get_email_from_excel(self, registration_number):
         df = pd.read_excel(self.excel_file)
@@ -66,21 +97,20 @@ class EmailForwarder:
         forward_msg["Subject"] = "FWD: " + msg["Subject"]
 
         for part in msg.walk():
-            # Skip multipart parts
+            # Skip multipart container parts
             if part.get_content_maintype() == 'multipart':
                 continue
 
             # For attachments
             if part.get('Content-Disposition') is not None:
                 forward_msg.attach(part)
-            # For plain text or HTML parts
+            # For plain text or HTML parts, relaxed conditions
             else:
                 content_type = part.get_content_type()
-                content_disposition = part.get("Content-Disposition")
 
-                if content_type == "text/plain" and content_disposition is None:
+                if content_type.startswith("text/plain"):
                     forward_msg.attach(MIMEText(part.get_payload(decode=True).decode("utf-8"), "plain"))
-                elif content_type == "text/html":
+                elif content_type.startswith("text/html"):
                     forward_msg.attach(MIMEText(part.get_payload(decode=True).decode("utf-8"), "html"))
 
         smtp_server = smtplib.SMTP(self.smtp_server, 25)
@@ -100,10 +130,11 @@ class EmailForwarder:
         with open(self.forwarded_file, "a") as f:
             f.write(email_id + "\n")
 
-    def log_not_forwarded(self, registration_number, email_body):
-        """Log the registration number and email in a log file when forwarding fails."""
-        with open(self.log_file, "a") as f:
-            f.write(f"Registration Number: {registration_number}, Email: {email_body}\n")
+    def log_not_forwarded(self, registration_number, email_body, fields):
+        """Log the registration number, email body, and other fields when forwarding fails."""
+        with open(self.log_file, "a", encoding="utf-8") as f:  # Specify UTF-8 encoding
+            f.write(f"Registration Number: {registration_number}, Certificate: {fields['certificate_number']}, "
+                    f"Policy: {fields['policy_number']}, Chassis: {fields['chassis_number']}, Email Body: {email_body}\n")
 
     def process_emails(self):
         self.connect_imap()
@@ -119,24 +150,42 @@ class EmailForwarder:
             msg = email.message_from_bytes(raw_email)
 
             if msg.is_multipart():
+                body = None  # Initialize to None to handle cases where no text part is found
                 for part in msg.walk():
-                    if part.get_content_type() == "text/plain":
+                    print(part.get_content_type())  # Debugging to see the actual content types
+
+                    # Relaxed check for plain text
+                    if part.get_content_type().startswith("text/plain"):
                         body = part.get_payload(decode=True).decode("utf-8")
-                        registration_number = self.extract_registration_number(body)
-                        if registration_number:
-                            recipient_email = self.get_email_from_excel(registration_number)
-                            if recipient_email:
-                                self.forward_email(msg, recipient_email)
-                                self.mark_as_forwarded(email_id.decode())  # Mark email as forwarded
-                            else:
-                                self.log_not_forwarded(registration_number, body)  # Log not forwarded email
+                        # print("Plain Text Body Extracted: ", body)  # Debugging: print the extracted body
+                        break  # If plain text is found, no need to check further parts
+
+                    # Optionally, check for HTML content if no plain text is found
+                    elif part.get_content_type().startswith("text/html"):
+                        body = part.get_payload(decode=True).decode("utf-8")
+                        # print("HTML Body Extracted: ", body)  # Debugging: print the extracted body
+
+                if body:
+                    # Process the email body using BeautifulSoup to extract text from HTML
+                    registration_number = self.extract_registration_number(body)
+                    fields = self.extract_other_fields(body)  # Extract other fields
+                    if registration_number:
+                        recipient_email = self.get_email_from_excel(registration_number)
+                        if recipient_email:
+                            self.forward_email(msg, recipient_email)
+                            self.mark_as_forwarded(email_id.decode())  # Mark email as forwarded
+                        else:
+                            self.log_not_forwarded(registration_number, body, fields)  # Log not forwarded email
             else:
+                # Handle non-multipart emails
                 body = msg.get_payload(decode=True).decode("utf-8")
+                # print("Non-Multipart Body Extracted: ", body)  # Debugging: print the extracted body
                 registration_number = self.extract_registration_number(body)
+                fields = self.extract_other_fields(body)  # Extract other fields
                 if registration_number:
                     recipient_email = self.get_email_from_excel(registration_number)
                     if recipient_email:
                         self.forward_email(msg, recipient_email)
                         self.mark_as_forwarded(email_id.decode())  # Mark email as forwarded
                     else:
-                        self.log_not_forwarded(registration_number, body)  # Log not forwarded email
+                        self.log_not_forwarded(registration_number, body, fields)  # Log not forwarded email
