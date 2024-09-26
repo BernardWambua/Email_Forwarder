@@ -8,10 +8,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
-
 class EmailForwarder:
     def __init__(self, imap_server, smtp_server, mail_date, staff_number, sender_email, password, excel_file,
-                 sender_filter, forwarded_file="forwarded_emails.txt"):
+                 sender_filter, forwarded_file=""):
         self.imap_server = imap_server
         self.smtp_server = smtp_server
         self.staff_number = staff_number
@@ -21,11 +20,17 @@ class EmailForwarder:
         self.sender_filter = sender_filter
         self.mail = None
         self.date = datetime.strptime(mail_date, "%d/%m/%Y")
-        self.forwarded_file = forwarded_file
+        self.forwarded_file = "forwarded_emails_" + mail_date + ".txt"
+        self.log_file = "not_forwarded_log_" + mail_date + ".txt"  # Log file for emails not forwarded
 
         # Ensure the forwarded email tracking file exists
         if not os.path.exists(self.forwarded_file):
             with open(self.forwarded_file, "w") as f:
+                pass
+
+        # Ensure the log file exists
+        if not os.path.exists(self.log_file):
+            with open(self.log_file, "w") as f:
                 pass
 
     def connect_imap(self):
@@ -95,6 +100,11 @@ class EmailForwarder:
         with open(self.forwarded_file, "a") as f:
             f.write(email_id + "\n")
 
+    def log_not_forwarded(self, registration_number, email_body):
+        """Log the registration number and email in a log file when forwarding fails."""
+        with open(self.log_file, "a") as f:
+            f.write(f"Registration Number: {registration_number}, Email: {email_body}\n")
+
     def process_emails(self):
         self.connect_imap()
         email_ids = self.fetch_emails_from_today()
@@ -118,6 +128,8 @@ class EmailForwarder:
                             if recipient_email:
                                 self.forward_email(msg, recipient_email)
                                 self.mark_as_forwarded(email_id.decode())  # Mark email as forwarded
+                            else:
+                                self.log_not_forwarded(registration_number, body)  # Log not forwarded email
             else:
                 body = msg.get_payload(decode=True).decode("utf-8")
                 registration_number = self.extract_registration_number(body)
@@ -126,3 +138,5 @@ class EmailForwarder:
                     if recipient_email:
                         self.forward_email(msg, recipient_email)
                         self.mark_as_forwarded(email_id.decode())  # Mark email as forwarded
+                    else:
+                        self.log_not_forwarded(registration_number, body)  # Log not forwarded email
