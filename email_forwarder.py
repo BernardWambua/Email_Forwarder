@@ -20,8 +20,8 @@ class EmailForwarder:
         self.sender_filter = sender_filter
         self.mail = None
         self.date = datetime.strptime(mail_date, "%d/%m/%Y")
-        self.forwarded_file = "forwarded_emails_" + mail_date + ".txt"
-        self.log_file = "not_forwarded_log_" + mail_date + ".txt"  # Log file for emails not forwarded
+        self.forwarded_file = "forwarded_emails_" + mail_date.replace("/", "_") + ".txt"
+        self.log_file = "not_forwarded_log_" + mail_date.replace("/", "_") + ".txt"  # Log file for emails not forwarded
 
         # Ensure the forwarded email tracking file exists
         if not os.path.exists(self.forwarded_file):
