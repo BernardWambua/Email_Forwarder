@@ -15,7 +15,7 @@ def index():
         "imap_server": "mail.kengen.co.ke",
         "smtp_server": "172.16.4.7",
         "mail_date": "26/09/2024",
-        "staff_number": "Insurance",
+        "staff_number": "ISDesk",
         "sender_email": "insurance@kengen.co.ke",
         "password": "",
         "sender_filter": "aki@dmvic.com"
