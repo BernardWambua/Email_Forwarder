@@ -10,7 +10,10 @@ if __name__ == "__main__":
         password="",
         excel_file="",
         sender_filter="",
-        mail_date=""
+        mail_date="26/09/2024",
+        cc_email="",
+        pdf_filename="",
+        insurance_message_file=""
     )
 
     email_forwarder.process_emails()

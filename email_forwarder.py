@@ -10,11 +10,13 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from bs4 import BeautifulSoup
+from email.mime.application import MIMEApplication
 
 
 class EmailForwarder:
-    def __init__(self, imap_server, smtp_server, mail_date, staff_number, sender_email, password, excel_file,
-                 sender_filter):
+    def __init__(self, imap_server, smtp_server, mail_date, staff_number, sender_email,
+                 password, excel_file, sender_filter, cc_email, pdf_filename,
+                 insurance_message_file):
         self.imap_server = imap_server
         self.smtp_server = smtp_server
         self.staff_number = staff_number
@@ -25,8 +27,11 @@ class EmailForwarder:
         self.mail = None
         self.date = datetime.strptime(mail_date, "%d/%m/%Y")
         self.forwarded_file = "forwarded_emails_" + mail_date.replace("/", "_") + ".csv"
-        self.log_file = "not_forwarded_log_" + mail_date.replace("/", "_") + ".txt"  # Log file for emails not forwarded
-
+        self.log_file = "not_forwarded_log_" + mail_date.replace("/", "_") + ".txt"
+        self.cc_email = cc_email
+        self.pdf_filename = pdf_filename
+        with open(insurance_message_file, 'r', encoding='utf-8') as file:
+            self.insurance_message = file.read().replace('\n', '<br>')
         # Ensure the forwarded email tracking CSV file exists
         if not os.path.exists(self.forwarded_file):
             with open(self.forwarded_file, mode="w", newline="") as f:
@@ -92,7 +97,13 @@ class EmailForwarder:
         forward_msg = MIMEMultipart()
         forward_msg["From"] = self.sender_email
         forward_msg["To"] = recipient_email
+        forward_msg["Cc"] = self.cc_email
         forward_msg["Subject"] = "FWD: " + msg["Subject"]
+
+        # Collect the recipients for sending the email
+        recipients = [recipient_email, self.cc_email]
+
+        body_content = ""
 
         for part in msg.walk():
             if part.get_content_maintype() == 'multipart':
@@ -101,19 +112,45 @@ class EmailForwarder:
                 forward_msg.attach(part)
             else:
                 content_type = part.get_content_type()
-                if content_type.startswith("text/plain"):
-                    forward_msg.attach(MIMEText(part.get_payload(decode=True).decode("utf-8"), "plain"))
-                elif content_type.startswith("text/html"):
-                    forward_msg.attach(MIMEText(part.get_payload(decode=True).decode("utf-8"), "html"))
 
+                # Handle plain text content
+                if content_type.startswith("text/plain"):
+                    body_content = part.get_payload(decode=True).decode("utf-8")
+
+                    # Prepend the insurance message to the plain text email
+                    full_body_text = self.insurance_message + "\n\n" + body_content
+                    forward_msg.attach(MIMEText(full_body_text, "plain"))
+
+                # Handle HTML content
+                elif content_type.startswith("text/html"):
+                    body_content = part.get_payload(decode=True).decode("utf-8")
+
+                    # Convert the plain text insurance message to HTML with <br> tags
+                    insurance_message_html = self.insurance_message.replace("\n", "<br>")
+
+                    # Prepend the insurance message to the HTML email
+                    full_body_html = f"<p>{insurance_message_html}</p>{body_content}"
+                    forward_msg.attach(MIMEText(full_body_html, "html"))
+
+        # Attach the test.pdf file from the same directory
+        try:
+            with open(self.pdf_filename, "rb") as pdf_file:
+                attach = MIMEApplication(pdf_file.read(), _subtype="pdf")
+                attach.add_header('Content-Disposition', 'attachment', filename=self.pdf_filename)
+                forward_msg.attach(attach)
+        except FileNotFoundError:
+            print(f"Attachment {self.pdf_filename} not found.")
+
+        # Try to send the email via SMTP
         try:
             smtp_server = smtplib.SMTP(self.smtp_server, 587)
             smtp_server.starttls()
             smtp_server.login(self.staff_number, self.password)
-            smtp_server.sendmail(self.sender_email, recipient_email, forward_msg.as_string())
+            smtp_server.sendmail(self.sender_email, recipients, forward_msg.as_string())
             smtp_server.quit()
 
-            print(f"Email sent successfully to {recipient_email}")
+            print(
+                f"Email sent successfully to {recipient_email} (CC: {self.cc_email}) with attachment {self.pdf_filename}")
             self.mark_as_forwarded(reg_number)
             time.sleep(15)
 
