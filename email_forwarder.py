@@ -8,6 +8,7 @@ import smtplib
 import csv
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from datetime import datetime
 from bs4 import BeautifulSoup
 
@@ -23,9 +24,11 @@ class EmailForwarder:
         self.excel_file = excel_file
         self.sender_filter = sender_filter
         self.mail = None
+        self.cc_email = "department-insurance@kengen.co.ke"
         self.date = datetime.strptime(mail_date, "%d/%m/%Y")
         self.forwarded_file = "forwarded_emails_" + mail_date.replace("/", "_") + ".csv"
         self.log_file = "not_forwarded_log_" + mail_date.replace("/", "_") + ".txt"  # Log file for emails not forwarded
+        self.df = pd.read_excel(self.excel_file)
 
         # Ensure the forwarded email tracking CSV file exists
         if not os.path.exists(self.forwarded_file):
@@ -42,12 +45,17 @@ class EmailForwarder:
         self.mail = imaplib.IMAP4_SSL(self.imap_server)
         self.mail.login(self.staff_number, self.password)
         self.mail.select("inbox")
+        print("Connected")
 
     def fetch_emails_from_today(self):
         day = self.date.strftime('%d-%b-%Y')
         search_criteria = f'(SINCE "{day}" FROM "{self.sender_filter}")'
         result, data = self.mail.search(None, search_criteria)
         email_ids = data[0].split()
+        if len(email_ids) > 0:
+            print(f"Emails found are :{len(email_ids)}.")
+        else:
+            print("No email IDs extracted.")
         return email_ids
 
     @staticmethod
@@ -82,35 +90,65 @@ class EmailForwarder:
         }
 
     def get_email_from_excel(self, registration_number):
-        df = pd.read_excel(self.excel_file)
-        email_match = df[df['REG NUMBER'] == registration_number]['EMAIL ADDRESS']
-        if not email_match.empty:
-            return email_match.values[0]
-        return None
+        email_match = self.df[self.df['REG NUMBER'] == registration_number]['EMAIL ADDRESS']
+        return email_match.values[0] if not email_match.empty else None
 
-    def forward_email(self, msg, recipient_email, reg_number):
+    def forward_email(self, msg, recipient_email, reg_number, body_file="sticker_email_message.txt",
+                      extra_attachment="REGENT LETTER 2025 - KENGEN STAFF SCHEME.pdf"):
         forward_msg = MIMEMultipart()
         forward_msg["From"] = self.sender_email
         forward_msg["To"] = recipient_email
-        forward_msg["Subject"] = "FWD: " + msg["Subject"]
+        # forward_msg["Cc"] = self.cc_email
+        forward_msg["Subject"] = "FWD: KenGen Staff Motor Scheme Renewal – Digital Certificate"
 
+        # 1. Load body (HTML with subject in bold)
+        try:
+            with open(body_file, "r", encoding="utf-8") as f:
+                new_body = f.read()
+
+            # Replace placeholder with actual reg number
+            new_body = new_body.replace("[insert number]", reg_number)
+
+            # Convert line breaks to <br> for HTML formatting
+            html_body = f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; line-height: 1.5;">
+                    <p><b>{msg['Subject']}</b></p>
+                    <p>{new_body.replace(chr(10), "<br>")}</p>
+                </body>
+            </html>
+            """
+            forward_msg.attach(MIMEText(html_body, "html"))
+
+        except FileNotFoundError:
+            print(f"⚠️ Body file {body_file} not found. Using default text.")
+            fallback_body = f"<b>{msg['Subject']}</b><br><br>Please see the attached files for Reg. No. {reg_number}."
+            forward_msg.attach(MIMEText(fallback_body, "html"))
+
+        # 2. Keep original attachments only
         for part in msg.walk():
-            if part.get_content_maintype() == 'multipart':
+            if part.get_content_maintype() == "multipart":
                 continue
-            if part.get('Content-Disposition') is not None:
-                forward_msg.attach(part)
-            else:
-                content_type = part.get_content_type()
-                if content_type.startswith("text/plain"):
-                    forward_msg.attach(MIMEText(part.get_payload(decode=True).decode("utf-8"), "plain"))
-                elif content_type.startswith("text/html"):
-                    forward_msg.attach(MIMEText(part.get_payload(decode=True).decode("utf-8"), "html"))
-
+            if part.get("Content-Disposition") is None:
+                continue  # skip inline/plain/html text
+            forward_msg.attach(part)
+        # 3. Add extra attachment
+        if os.path.exists(extra_attachment):
+            with open(extra_attachment, "rb") as f:
+                pdf_part = MIMEApplication(f.read(), _subtype="pdf")
+                pdf_part.add_header("Content-Disposition", "attachment", filename=os.path.basename(extra_attachment))
+                forward_msg.attach(pdf_part)
+            print(f"✅ Added extra attachment: {extra_attachment}")
+        else:
+            print(f"⚠️ Extra attachment {extra_attachment} not found, skipping.")
+        # 4. Send email
         try:
             smtp_server = smtplib.SMTP(self.smtp_server, 587)
             smtp_server.starttls()
             smtp_server.login(self.staff_number, self.password)
-            smtp_server.sendmail(self.sender_email, recipient_email, forward_msg.as_string())
+
+            recipients = [recipient_email, self.cc_email]
+            smtp_server.sendmail(self.sender_email, recipients, forward_msg.as_string())
             smtp_server.quit()
 
             print(f"Email sent successfully to {recipient_email}")
